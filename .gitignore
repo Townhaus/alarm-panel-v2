@@ -17,3 +17,6 @@ __pycache__/
 .vscode/
 .idea/
 *.swp
+
+# Claude Code (local overrides only; settings.json is intentionally tracked)
+.claude/settings.local.json
