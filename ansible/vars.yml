@@ -1,0 +1,10 @@
+---
+# Build-only by default. Set upload=true explicitly after reviewing the build
+# and preparing the IoT reservation/MQTT/OTA callback firewall exceptions.
+alarm_panel_upload: false
+alarm_panel_current_host: "192.168.20.50"
+alarm_panel_expected_ip: "192.168.20.50"
+alarm_panel_deploy_host_ip: "192.168.2.169"
+alarm_panel_ota_host_port: 3232
+alarm_panel_mqtt_host: 192.168.2.91
+alarm_panel_mqtt_port: 1883

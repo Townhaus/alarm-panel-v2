@@ -1,6 +1,10 @@
 # Wokwi simulation workflow
 # Requires: pio, uv, wokwi-cli, op (1Password CLI)
 
+# Build using the IoT Wi-Fi credentials; upload only with explicit Ansible vars.
+deploy *args:
+    bash scripts/deploy.sh {{args}}
+
 # Build firmware and launch sim + MQTT harness in parallel
 sim: build
     #!/usr/bin/env bash

@@ -137,6 +137,12 @@ Behavior:
 
 ## Build and Upload
 
+For the IoT Wi-Fi migration and repeatable deployment with Ansible, see
+[the Ansible deployment guide](ansible/README.md). `bash scripts/deploy.sh`
+builds real hardware firmware using the shared IoT password from 1Password;
+uploading requires an explicit option and target addresses. The legacy commands
+below remain available for simulation and the original 1Password item schema.
+
 Run these commands from the project root:
 
 ```bash
