@@ -1,0 +1,61 @@
+---
+- name: Build and optionally deploy the alarm panel firmware
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    alarm_panel_root: "{{ playbook_dir | dirname }}"
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - name: Require explicit addresses for an OTA deployment
+      ansible.builtin.assert:
+        that:
+          - not (alarm_panel_upload | bool) or alarm_panel_current_host | length > 0
+          - not (alarm_panel_upload | bool) or alarm_panel_expected_ip | length > 0
+          - not (alarm_panel_upload | bool) or alarm_panel_deploy_host_ip | length > 0
+        fail_msg: Set the current panel IP, expected IoT IP and deploy machine LAN IP before uploading.
+
+    - name: Preview the deployment workflow
+      ansible.builtin.debug:
+        msg:
+          mode: "{{ 'OTA upload' if alarm_panel_upload | bool else 'build only' }}"
+          ssid: GREATWHITE-IoT
+          target: "{{ alarm_panel_current_host }}"
+          expected_ip: "{{ alarm_panel_expected_ip }}"
+          mqtt_host: "{{ alarm_panel_mqtt_host }}"
+          mqtt_port: "{{ alarm_panel_mqtt_port }}"
+          ota_callback_port: "{{ alarm_panel_ota_host_port }}"
+
+    - name: Build firmware and optionally upload over authenticated OTA
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ alarm_panel_root }}/scripts/deploy_firmware.py"
+          - --mode
+          - "{{ 'deploy' if alarm_panel_upload | bool else 'build' }}"
+          - --target
+          - "{{ alarm_panel_current_host }}"
+          - --expected-ip
+          - "{{ alarm_panel_expected_ip }}"
+          - --host-ip
+          - "{{ alarm_panel_deploy_host_ip }}"
+          - --host-port
+          - "{{ alarm_panel_ota_host_port | string }}"
+        chdir: "{{ alarm_panel_root }}"
+      environment:
+        ALARM_PANEL_MQTT_HOST: "{{ alarm_panel_mqtt_host }}"
+        ALARM_PANEL_MQTT_PORT: "{{ alarm_panel_mqtt_port | string }}"
+      register: alarm_panel_deployment
+      changed_when: true
+      no_log: true
+      when: not ansible_check_mode
+      async: 1800
+      poll: 5
+
+    - name: Show the non-secret artifact summary
+      ansible.builtin.debug:
+        msg: "{{ alarm_panel_deployment.stdout | from_json }}"
+      when: not ansible_check_mode

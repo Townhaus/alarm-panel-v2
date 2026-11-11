@@ -1,5 +1,7 @@
 # PlatformIO
 .pio/
+.artifacts/
+ansible/local.yml
 
 # Secrets
 include/secrets.h
