@@ -50,6 +50,8 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--password", default=os.getenv("MQTT_PASSWORD"), help="MQTT password")
   parser.add_argument("--prefix", default="", help="Optional topic prefix (example: test/user1)")
   parser.add_argument("--interval", type=float, default=8.0, help="Weather publish interval seconds")
+  parser.add_argument("--pin", default="1234", help="Simulated disarm PIN (default: 1234)")
+  parser.add_argument("--reject-pin", action="store_true", help="Reject every simulated disarm PIN")
   return parser.parse_args()
 
 
@@ -70,7 +72,8 @@ def on_connect(client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: 
 
 def on_message(client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
   payload = msg.payload.decode("utf-8", errors="replace")
-  print(f"[RX] {msg.topic} -> {payload}")
+  if msg.topic != client.topic_alarmo_command:
+    print(f"[RX] {msg.topic} -> {payload}")
 
   if msg.topic == client.topic_garage_command and payload.strip().upper() == "TOGGLE":
     next_state = "open" if client.garage_state in ("closed", "closing") else "closed"
@@ -91,6 +94,14 @@ def on_message(client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> No
       state_topic = client.topic_alarmo_interior_state
     else:
       state_topic = client.topic_alarmo_perimeter_state
+
+    print(f"[RX] Alarm command={command} area={area}")
+    if command == "disarm" and (client.reject_pin or data.get("code") != client.pin):
+      event_topic = state_topic.rsplit("/", 1)[0] + "/event"
+      reason = "INVALID_CODE_PROVIDED" if data.get("code") else "NO_CODE_PROVIDED"
+      client.publish(event_topic, json.dumps({"event": reason}), retain=False)
+      print(f"[TX] {event_topic} -> {reason}")
+      return
 
     command_to_state = {
         "arm_home": "armed_home",
@@ -144,6 +155,8 @@ def main() -> int:
   client.topic_alarmo_garage_state = with_prefix(prefix, TOPIC_ALARMO_GARAGE_STATE)
   client.topic_alarmo_command = with_prefix(prefix, TOPIC_ALARMO_COMMAND)
   client.garage_state = "closed"
+  client.pin = args.pin
+  client.reject_pin = args.reject_pin
 
   print(f"[HARNESS] Connecting to {args.host}:{args.port}")
   client.connect(args.host, args.port, keepalive=60)

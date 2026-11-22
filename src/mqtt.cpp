@@ -5,6 +5,7 @@
 
 #include "app_state.h"
 #include "secrets.h"
+#include "alarmo_events.h"
 
 // --- Globals owned by this module ---
 
@@ -18,11 +19,6 @@ char weatherText[32] = "--";
 
 bool mqttReady() {
   return WiFi.status() == WL_CONNECTED && mqttClient.connected();
-}
-
-void updateMqttStatusLabel(bool connected) {
-  setStatusLabelText(connected ? "connected" : "disconnected",
-                     connected ? lv_color_hex(0x81B29A) : lv_color_hex(0xE07A5F));
 }
 
 namespace {
@@ -90,7 +86,7 @@ bool publishAlarmoCommand(const char *command, const char *area, const char *cod
     return false;
   }
 
-  Serial.printf("[MQTT] Publish %s -> %s\n", Secrets::ALARMO_COMMAND_TOPIC, payload);
+  Serial.printf("[MQTT] Alarm command=%s area=%s\n", command, area);
   return mqttClient.publish(Secrets::ALARMO_COMMAND_TOPIC, payload);
 }
 
@@ -118,9 +114,7 @@ bool executeAlarmAction(AlarmTarget target, AlarmAction action, const char *code
     }
 
     Serial.printf("[MQTT] Publish %s -> TOGGLE\n", Secrets::MQTT_TOPIC_GARAGE_DOOR_COMMAND);
-    mqttClient.publish(Secrets::MQTT_TOPIC_GARAGE_DOOR_COMMAND, "TOGGLE");
-    showToast("Command sent");
-    return true;
+    return mqttClient.publish(Secrets::MQTT_TOPIC_GARAGE_DOOR_COMMAND, "TOGGLE");
   }
 
   const char *command = nullptr;
@@ -147,17 +141,16 @@ bool executeAlarmAction(AlarmTarget target, AlarmAction action, const char *code
     return false;
   }
 
-  bool success = publishAlarmoCommand(command, area, code);
-
-  if (success) {
-    showToast("Command sent");
-  } else {
-    showToast("Not connected");
-  }
-  return success;
+  return publishAlarmoCommand(command, area, code);
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
+  AlarmTarget eventTarget;
+  if (alarmoEventTarget(topic, eventTarget)) {
+    // Parse the original bounded payload; never truncate JSON or log event bodies.
+    handleAlarmoMessage(topic, reinterpret_cast<const char *>(payload), length);
+    return;
+  }
   char message[96];
   const size_t copyLength = min(length, static_cast<unsigned int>(sizeof(message) - 1));
   memcpy(message, payload, copyLength);
@@ -258,6 +251,8 @@ bool connectMqtt() {
   mqttClient.subscribe(Secrets::ALARMO_PERIMETER_STATE_TOPIC);
   mqttClient.subscribe(Secrets::ALARMO_INTERIOR_STATE_TOPIC);
   mqttClient.subscribe(Secrets::ALARMO_GARAGE_STATE_TOPIC);
+  for (unsigned i = 0; i < 3; ++i)
+    mqttClient.subscribe(alarmoEventTopic(static_cast<AlarmTarget>(i)));
   updateMqttStatusLabel(true);
   return true;
 }

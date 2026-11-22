@@ -171,6 +171,7 @@ void setup() {
   setupLvgl();
   setupWatchdog();
   mqttClient.setServer(MQTT_HOST_RUNTIME, MQTT_PORT_RUNTIME);
+  mqttClient.setBufferSize(1152); // Room for event JSON including sensor metadata.
   mqttClient.setCallback(mqttCallback);
 
   lastLvglTickMs = millis();
@@ -180,7 +181,7 @@ void setup() {
   connectMqtt();
 
 #if defined(WOKWI_SIM)
-  Serial.println("[SIM] Controls: p=perimeter i=interior g=garage d=door a=primary h/w/n/v=arm modes 0-9 pin s=submit c=cancel x=backspace");
+  Serial.println("[SIM] u=disarm house o=open garage w=Away n=Night p/i/g/d=individual 0-9=PIN s=submit c=back/cancel x=delete");
 #endif
 }
 
