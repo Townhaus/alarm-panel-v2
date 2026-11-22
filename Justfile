@@ -41,3 +41,16 @@ harness:
 # Install Python deps for the harness
 setup:
     uv tool install platformio
+
+# Build the native simulator: same LVGL UI, mouse input, fake HA, no secrets or network.
+desktop-build:
+    cmake -S desktop -B .artifacts/desktop -DCMAKE_BUILD_TYPE=Debug
+    cmake --build .artifacts/desktop --parallel
+
+# Open the desktop panel and its clickable scenario controls.
+desktop: desktop-build
+    .artifacts/desktop/alarm-panel
+
+# Check workflow edge cases and exercise the real LVGL UI with mouse/keypad input.
+desktop-test: desktop-build
+    ctest --test-dir .artifacts/desktop --output-on-failure

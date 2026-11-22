@@ -47,18 +47,125 @@ PlatformIO project for an `ESP32-WROOM-32` driving an `ILI9341` 240x320 SPI TFT 
 - `include/secrets.example.h`: Template showing the generated header shape
 - `include/secrets.h`: Generated local secrets header from 1Password
 - `scripts/render_secrets_header.py`: Generates `include/secrets.h` from 1Password
-- `src/main.cpp`: Hardware setup, LVGL integration, UI, and placeholder actions
+- `src/main.cpp`: Wi-Fi, OTA, settings, and hardware startup
+- `src/ui.cpp`: Shared LVGL interface
+- `src/workflow.cpp`: Confirmed, grouped actions and garage sequencing
+- `desktop/`: SDL display/input and simulated Home Assistant backend
 
 ## Current UI
 
-- Top row with local time and weather summary
-- `Master` alarm status card
-- `Garage` alarm status card
-- `Garage Door` status card
-- Tap a card to open an action modal
-- Alarm arming uses direct mode buttons
-- Alarm disarm requires PIN entry
-- Garage door modal shows `Open` or `Close` based on current door state
+The panel uses a monochrome terminal style: JetBrains Mono, black backgrounds,
+square white borders, inverted button presses, and explicit state labels. Red is
+reserved for a triggered alarm. Individual area controls remain available by
+tapping the status rows.
+
+- **Disarm House**: enter a PIN once to disarm Perimeter and Interior; Garage is unchanged.
+- **Open / Close Garage**: if necessary, enter a PIN to disarm Garage, wait for its
+  confirmed disarmed state, then open the door. An already disarmed garage opens
+  directly. When open, the shortcut changes to **Close Garage**, which asks for
+  confirmation. The completed-open screen also offers **Close Garage**. Moving or
+  unknown door states disable the shortcut.
+- **Arm Away**: confirm to arm all three areas in Away mode.
+- **Good Night**: confirm to arm all three areas in Night mode.
+
+Commands stay pending until MQTT state updates confirm the result. Grouped
+operations show each area's state and a confirmed count. An unconfirmed disarm
+never proceeds to open the garage. Door toggles are sent once, and moving or
+unknown doors are blocked. Back cancels any remaining steps; commands already
+sent may still finish. Home Assistant retains responsibility for automatic garage
+rearming. Alarm confirmation times out after 90 seconds; door movement after 20.
+These limits should be checked against the actual HA exit delay and door travel time.
+
+## Desktop Simulator
+
+The native SDL simulator compiles the **same UI and workflow C++ code** as the
+ESP32. Click the panel with your mouse, or type PIN digits and use Enter,
+Backspace, and Escape. The display is shown at 2x size. There is no connection to
+Home Assistant, MQTT, or the installed panel: all responses are local simulations,
+and no secrets or 1Password access are required.
+
+On macOS, install the build dependencies if needed:
+
+```bash
+brew install cmake pkg-config sdl2
+```
+
+The build uses the project's existing LVGL 8.4 dependency. On a fresh checkout,
+install it first (this downloads libraries without generating runtime secrets):
+
+```bash
+pio pkg install -e esp32dev
+just desktop
+```
+
+Without `just`:
+
+```bash
+cmake -S desktop -B .artifacts/desktop -DCMAKE_BUILD_TYPE=Debug
+cmake --build .artifacts/desktop --parallel
+.artifacts/desktop/alarm-panel
+```
+
+If LVGL is elsewhere, configure with `-DLVGL_DIR=/path/to/lvgl-8.4`.
+
+The companion test lab provides:
+
+- Night and Disarmed presets (also reset the door to closed).
+- MQTT offline, rejected PIN, 15-second acknowledgement delay, and partial result toggles.
+- Triggered alarm, unknown states, display sleep, and a +90-second timeout shortcut.
+
+The fake backend accepts PIN **1234**. Partial results withhold Interior confirmation.
+Rejected PINs now emit the same failure event as Alarmo and immediately show
+**PIN NOT ACCEPTED** with a **RETRY PIN** button. A retry clears the old PIN and
+requests a fresh one; already confirmed areas are skipped. Partial results still
+withhold confirmation, so **+90 SEC** exercises a genuinely unresponsive command.
+
+Run the focused workflow checks and real UI interaction smoke test with:
+
+```bash
+just desktop-test
+```
+
+The smoke test writes `preview-*.bmp` screenshots into `.artifacts/desktop`.
+The simulator validates UI and action sequencing; it does not emulate ESP32 timing,
+physical touch calibration, Wi-Fi, or OTA. Wokwi remains available for firmware simulation.
+
+The bundled font is licensed under the SIL Open Font License in
+`assets/fonts/OFL.txt`. Generated LVGL font sources are committed, so Pillow is
+needed only when regenerating fonts:
+
+```bash
+python3 scripts/generate_panel_font.py
+python3 scripts/generate_panel_font.py --size 40
+```
+
+## Alarmo Failure Feedback
+
+The panel subscribes to `alarmo/perimeter/event`, `alarmo/interior/event`, and
+`alarmo/garage/event`, following [Alarmo's MQTT event protocol](https://github.com/nielsfaber/alarmo#event-topic).
+Alarmo's MQTT **event topic** must be enabled and set to `alarmo/event` for this
+default configuration. Custom topic roots or area slugs can be changed in
+`src/alarmo_events.cpp`. No Home Assistant automation is required.
+
+- `INVALID_CODE_PROVIDED`: **PIN NOT ACCEPTED**, with fresh PIN retry for disarming.
+- `NO_CODE_PROVIDED`: **PIN REQUIRED**, with fresh PIN retry for disarming.
+- `COMMAND_NOT_ALLOWED`: **COMMAND NOT ALLOWED**.
+- `FAILED_TO_ARM`: **OPEN SENSORS / Unable to arm**.
+
+Failures apply only while waiting on a command sent to that area. Events for
+unrelated or already confirmed areas, completed/cancelled operations, unknown
+payloads, and mismatched commands are ignored. Group results retain partial
+success. A failed garage disarm cancels the door-opening step even if a delayed
+state update arrives afterward. Successful actions still require state confirmation.
+
+Alarmo events do not carry a request/client ID, so a simultaneous failure from
+another controller targeting the same pending area cannot be distinguished from
+this panel's request. Malformed, missing, or oversized event messages fall back
+to the existing confirmation timeout. Event JSON is parsed up to 1024 bytes;
+the MQTT receive buffer is 1152 bytes. Events should never be published retained.
+
+The Wokwi harness uses simulated PIN `1234` and emits matching per-area failures.
+Use `--pin` to change the simulated PIN or `--reject-pin` to reject every disarm.
 
 ## MQTT Setup
 
@@ -96,7 +203,7 @@ Generate the local header with:
 python3 scripts/render_secrets_header.py
 ```
 
-Current publish topics are:
+Current MQTT topics include:
 
 - `home/keypad/status`
 - `home/keypad/display/set`
@@ -104,17 +211,21 @@ Current publish topics are:
 - `garage/door/command`
 - `garage/door/state`
 - `alarmo/command`
-- `alarmo/state`
+- `alarmo/perimeter/state`
+- `alarmo/interior/state`
 - `alarmo/garage/state`
+- `alarmo/perimeter/event`
+- `alarmo/interior/event`
+- `alarmo/garage/event`
 
 Current behavior:
 
 - The device connects to WiFi during boot
 - The device attempts an MQTT connection after WiFi is up
-- The top-left clock uses NTP once WiFi is connected
-- The top-right weather label updates from `weather/kbfi/state`
-- The keypad subscribes to `alarmo/state`, `alarmo/garage/state`, and `garage/door/state`
-- The main screen shows master alarm, garage alarm, and garage door status with color dots
+- The clock uses NTP once WiFi is connected
+- The screensaver weather label updates from `weather/kbfi/state`
+- The keypad subscribes to per-area Alarmo state/event topics and `garage/door/state`
+- The main screen shows shortcuts and Perimeter, Interior, Garage, and Door status rows
 - Alarm arming does not require a PIN
 - Alarm disarm requires a PIN
 - Garage door actions publish `TOGGLE` to `garage/door/command`
@@ -233,8 +344,12 @@ just harness
 The harness publishes:
 
 - `weather/kbfi/state` JSON payloads
-- `alarmo/state`
+- `alarmo/perimeter/state`
+- `alarmo/interior/state`
 - `alarmo/garage/state`
+- `alarmo/perimeter/event`
+- `alarmo/interior/event`
+- `alarmo/garage/event`
 - `garage/door/state`
 
 And listens for:
@@ -249,8 +364,8 @@ And listens for:
 - The backlight is enabled on `GPIO21`
 - The display is initialized with reset on `GPIO4`
 - Touch is initialized on its own SPI bus
-- LVGL renders a simple proof-of-concept keypad screen
-- Button presses log to Serial
+- LVGL renders the shared monochrome control screen
+- Actions publish MQTT commands and wait for state confirmation
 
 ## Touch Calibration
 
@@ -284,11 +399,12 @@ For example:
 - If pressing the left side triggers the right side, toggle `TOUCH_INVERT_X`
 - If pressing the top triggers the bottom, toggle `TOUCH_INVERT_Y`
 
-## Next Steps
+## Wokwi Serial Fallback
 
-- Add WiFi setup in `setup()` before any MQTT connection logic
-- Add MQTT client initialization after WiFi is connected
-- Replace placeholder publish functions with real MQTT publishes
-- Update `MQTT: disconnected` from actual connection state
-- Add a PIN pad modal or separate screen for arm/disarm workflows
-- Calibrate touch and refine coordinate mapping on the physical device
+The existing Wokwi diagram still uses serial controls rather than clickable touch.
+Use the native desktop simulator for normal UI development. Wokwi shortcuts:
+
+- `u`: Disarm House; `o`: Open Garage; `w`: Arm Away; `n`: Good Night
+- `p`, `i`, `g`, `d`: individual Perimeter, Interior, Garage, Door controls
+- `0`–`9`: PIN; `s` or Enter: submit/confirm; `x`: delete; `c`: back/cancel
+- `h` or `v`: Home or Vacation when an individual area's arm-mode chooser is open
