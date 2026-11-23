@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PLATFORMIO_SETTING_ENABLE_TELEMETRY: "no"
+
+jobs:
+  desktop:
+    name: Desktop tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.platformio/platforms
+            ~/.platformio/packages
+            ~/.platformio/.cache
+            .pio/libdeps
+          key: ${{ runner.os }}-${{ runner.arch }}-pio-desktop-${{ hashFiles('platformio.ini', '.github/requirements-ci.txt') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-pio-desktop-
+      - name: Install build tools and SDL
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cmake g++ libsdl2-dev pkg-config
+          python -m pip install --requirement .github/requirements-ci.txt
+      - name: Install project libraries
+        run: pio pkg install --environment esp32dev
+      - name: Configure desktop simulator
+        run: |
+          mkdir -p .artifacts/ci
+          cmake -S desktop -B .artifacts/desktop -DCMAKE_BUILD_TYPE=Debug 2>&1 | tee .artifacts/ci/desktop-configure.log
+      - name: Build desktop simulator
+        run: cmake --build .artifacts/desktop --parallel 2 2>&1 | tee .artifacts/ci/desktop-build.log
+      - name: Run workflow and UI interaction tests
+        run: ctest --test-dir .artifacts/desktop --output-on-failure 2>&1 | tee .artifacts/ci/desktop-tests.log
+      - name: Save screenshots and desktop logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-test-results
+          path: |
+            .artifacts/desktop/preview-*.bmp
+            .artifacts/desktop/Testing/Temporary/LastTest.log
+            .artifacts/ci/desktop-*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+  firmware:
+    name: Firmware builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.platformio/platforms
+            ~/.platformio/packages
+            ~/.platformio/.cache
+            .pio/libdeps
+          key: ${{ runner.os }}-${{ runner.arch }}-pio-firmware-${{ hashFiles('platformio.ini', '.github/requirements-ci.txt') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-pio-firmware-
+      - name: Install PlatformIO
+        run: python -m pip install --requirement .github/requirements-ci.txt
+      - name: Prepare dummy credentials
+        run: |
+          mkdir -p .artifacts/ci
+          cp include/secrets.example.h include/secrets.h
+      - name: Build hardware firmware
+        run: pio run --environment esp32dev 2>&1 | tee .artifacts/ci/firmware-hardware.log
+      - name: Build Wokwi firmware
+        run: pio run --environment esp32dev-wokwi 2>&1 | tee .artifacts/ci/firmware-wokwi.log
+      - name: Save firmware build logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware-build-logs
+          path: .artifacts/ci/firmware-*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+  python:
+    name: Python checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Run deployment tests
+        run: |
+          mkdir -p .artifacts/ci
+          python scripts/test_deployment.py 2>&1 | tee .artifacts/ci/python-tests.log
+      - name: Check helper script syntax
+        run: python -m compileall -q scripts 2>&1 | tee .artifacts/ci/python-syntax.log
+      - name: Save Python check logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-check-logs
+          path: .artifacts/ci/python-*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

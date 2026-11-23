@@ -139,6 +139,36 @@ python3 scripts/generate_panel_font.py
 python3 scripts/generate_panel_font.py --size 40
 ```
 
+## Continuous Integration
+
+GitHub Actions runs three Linux checks on pull requests and pushes to `main`.
+The workflow can also be started manually from the Actions tab.
+
+| Check | Validation |
+| --- | --- |
+| Desktop tests | Builds the SDL simulator and runs the workflow and real LVGL UI interaction tests headlessly. |
+| Firmware builds | Compiles `esp32dev` and `esp32dev-wokwi` with `include/secrets.example.h` copied to the generated header location. |
+| Python checks | Runs the deployment tests and compiles the helper scripts to check syntax. |
+
+The desktop suite covers grouped actions, PIN rejection/retry, garage opening
+and closing, sleep/wake, label fit, and the degree glyph. It uses SDL's dummy
+video driver and a software renderer; no display server or live MQTT broker is
+required. CI uses Python 3.12 and the PlatformIO version pinned in
+`.github/requirements-ci.txt`.
+
+Each run retains simulator BMP screenshots and test/build logs as Actions
+artifacts for seven days, including on failure when those files are available.
+Firmware binaries are not published. Toolchains and downloaded libraries are
+cached separately from generated firmware and secret headers. All CI builds use
+dummy credentials; the workflow does not access 1Password or upload over OTA.
+Physical deployment remains the existing manual workflow.
+
+The stable check names **Desktop tests**, **Firmware builds**, and **Python
+checks** can be selected as required checks in GitHub branch protection after
+successful runs. Adding the workflow does not itself change branch protection.
+Dependabot checks the pinned GitHub Actions for updates weekly. Font
+regeneration remains a local check until its rendering toolchain is pinned.
+
 ## Alarmo Failure Feedback
 
 The panel subscribes to `alarmo/perimeter/event`, `alarmo/interior/event`, and
