@@ -154,7 +154,9 @@ The desktop suite covers grouped actions, PIN rejection/retry, garage opening
 and closing, sleep/wake, label fit, and the degree glyph. It uses SDL's dummy
 video driver and a software renderer; no display server or live MQTT broker is
 required. CI uses Python 3.12 and the PlatformIO version pinned in
-`.github/requirements-ci.txt`.
+`.github/requirements-ci.txt`. The Espressif platform is pinned to 7.0.1 in
+`platformio.ini`, matching the Arduino 2.0.17 toolchain used for the installed
+firmware; platform upgrades should be reviewed separately.
 
 Each run retains simulator BMP screenshots and test/build logs as Actions
 artifacts for seven days, including on failure when those files are available.
